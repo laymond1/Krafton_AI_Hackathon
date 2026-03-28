@@ -54,18 +54,21 @@
 - One PDF report, max 2 pages.
 - The report must cover architecture description, Problem 1-1 approach and correctness proof, Problem 1-2 approach, training curve, accuracy vs. model size, and ablations / failed attempts.
 - One single Python file that defines the model and reproduces the results.
+- Explicitly required versus optional design freedom:
+- Required: PyTorch, self-attention, autoregressive generation, standard `forward()` returning logits, the fixed token format, the fixed `Problem 1-2` training protocol, the three scalar submission fields, the PDF report, and the single Python file.
+- Optional / design choice: positional encoding type, activation function, weight tying, parameter sharing, low-rank factorization, custom embedding strategy, and the specific architecture chosen for `Problem 1-2`.
 
 # Assumptions
-- Accuracy definition is not stated precisely.
+- Accuracy definition is not stated in problem.
 - Assumption: use exact-match product accuracy over sampled input pairs, not per-bit accuracy.
 - Why it matters: model-size decisions and verifier thresholds change substantially depending on this interpretation.
-- Inference procedure for autoregressive decoding is not described beyond “greedy decoding.”
+- Inference procedure for autoregressive decoding is not stated in problem beyond “greedy decoding.”
 - Assumption: the 12 input bits are provided as prompt context, then output bits are generated one by one with a causal mask.
 - Why it matters: builder and verifier should test the same decode path the judges are likely to use.
-- The problem does not say both subproblems must share one architecture.
+- The problem does not state that both subproblems must share one architecture.
 - Assumption: `Problem 1-1` and `Problem 1-2` may use different models if that reduces risk or parameter count.
 - Why it matters: execution can split into a proof-oriented exact design for `1-1` and a trainable compact design for `1-2`.
-- The statement says “single Python file” but does not specify whether helper functions/classes inside that file are acceptable.
+- The statement says “single Python file” but does not state whether helper functions/classes inside that file are acceptable.
 - Assumption: one `.py` file may contain multiple classes/functions as long as it fully reproduces the submission.
 - Why it matters: packaging can stay simple without forcing unnatural inlining later.
 
@@ -107,6 +110,14 @@
 - Record accuracy, model size, and failed attempts in a form usable for the PDF report.
 - Prepare the final three-number submission fields: `P_1`, `P_2`, `Acc_2`.
 - Prepare the final ZIP inputs: one PDF report and one single Python file.
+- Builder Checks
+- Do not start architecture work until the encode/decode contract and parameter-counting convention are frozen.
+- Keep `Problem 1-1` proofability as a hard gate; a smaller but unexplainable design is not acceptable.
+- Keep `Problem 1-2` experiments reproducible under the exact fixed training protocol rather than a tuned local variant.
+- Verifier Checks
+- Re-run token-order tests on every candidate model with greedy decoding, not teacher-forced reporting only.
+- Validate that reported parameter counts use unique parameters after tying and include biases / learned positional parameters when present.
+- Reject any candidate whose correctness argument or packaging artifacts cannot be traced back to explicit problem requirements.
 
 # Immediate Next Actions
 1. Build the shared encoding and verification harness first so every later result uses the exact required token format and counting rules.

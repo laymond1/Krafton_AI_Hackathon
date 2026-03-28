@@ -1,0 +1,9 @@
+=== Candidate 9 ===
+Config: d=32 L=2 h=2 ff=64
+Parameters: 20706
+Device: mps
+epoch=  1 lr=0.001000 loss=0.5085 exact=0.0527 bit=0.7166 t=50s
+epoch= 20 lr=0.000976 loss=0.1568 exact=0.3867 bit=0.8758 t=180s
+epoch= 40 lr=0.000905 loss=0.1126 exact=0.5352 bit=0.9020 t=321s
+epoch= 60 lr=0.000794 loss=0.0930 exact=0.6406 bit=0.9294 t=463s
+epoch= 80 lr=0.000655 loss=0.0759 exact=0.6973 bit=0.9404 t=645s
