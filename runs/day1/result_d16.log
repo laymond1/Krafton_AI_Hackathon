@@ -7,3 +7,4 @@ epoch= 20 lr=0.000976 loss=0.2256 exact=0.2461 bit=0.8241 t=176s
 epoch= 40 lr=0.000905 loss=0.1890 exact=0.2559 bit=0.8369 t=311s
 epoch= 60 lr=0.000794 loss=0.1625 exact=0.4023 bit=0.8781 t=449s
 epoch= 80 lr=0.000655 loss=0.1459 exact=0.4141 bit=0.8732 t=627s
+epoch=100 lr=0.000500 loss=0.1356 exact=0.4648 bit=0.8846 t=760s
