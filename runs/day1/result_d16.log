@@ -8,3 +8,13 @@ epoch= 40 lr=0.000905 loss=0.1890 exact=0.2559 bit=0.8369 t=311s
 epoch= 60 lr=0.000794 loss=0.1625 exact=0.4023 bit=0.8781 t=449s
 epoch= 80 lr=0.000655 loss=0.1459 exact=0.4141 bit=0.8732 t=627s
 epoch=100 lr=0.000500 loss=0.1356 exact=0.4648 bit=0.8846 t=760s
+epoch=120 lr=0.000345 loss=0.1271 exact=0.4746 bit=0.8939 t=916s
+epoch=140 lr=0.000206 loss=0.1205 exact=0.4531 bit=0.8931 t=1067s
+epoch=160 lr=0.000095 loss=0.1149 exact=0.5039 bit=0.8966 t=1218s
+epoch=180 lr=0.000024 loss=0.1121 exact=0.5098 bit=0.9004 t=1382s
+epoch=200 lr=0.000000 loss=0.1111 exact=0.5254 bit=0.9015 t=1529s
+
+=== Final full evaluation (all 4096 pairs) ===
+exact_match=0.5295 bit_accuracy=0.9022
+P_2=5234 Acc_2=0.5295
+Total time: 2001s

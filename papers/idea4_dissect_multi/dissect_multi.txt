@@ -1,0 +1,994 @@
+Dissecting Multiplication in Transformers: Insights into LLMs
+Luyu Qiu1 , Jianing Li2 , Chi Su2 , Chen Jason Zhang2 , Lei Chen1
+1
+
+Abstract
+
+54114
+
+57257
+
+Transformer-based large language models have achieved remarkable performance across various natural language processing tasks. However, they often struggle with seemingly
+easy tasks like arithmetic despite their vast capabilities. This
+stark disparity raise human’s concerns about their safe and
+ethical use, hinder their widespread adoption. In this paper,
+we focus on a typical arithmetic task, integer multiplication, to explore and explain the imperfection of transformers in this domain. We provide comprehensive analysis of a
+vanilla transformer trained to perform n-digit integer multiplication. Our observations indicate that the model decomposes multiplication task into multiple parallel subtasks, sequentially optimizing each subtask for each digit to complete
+the final multiplication. Based on observation and analysis,
+we infer the reasons of transformer’s deficiencies in multiplication tasks lies in their difficulty in calculating successive
+carryovers and caching intermediate results, and confirmed
+this inference through experiments. Guided by these findings,
+we propose improvements to enhance transformer’s performance on multiplication tasks. These enhancements are validated through rigorous testing and mathematical modeling,
+not only enhance transformer’s interpretability, but also improve its performance, e.g., we achieve over 99.9% accuracy
+on 5-digit integer multiplication with a tiny transformer, outperform LLMs GPT-4. Our method contributes to the broader
+fields of model understanding and interpretability, paving the
+way for analyzing more complex tasks and Transformer models. This work underscores the importance of explainable AI,
+helping to build trust in large language models and promoting
+their adoption in critical applications.
+
++ 98514
+
+× 51422
+
+152628
+(a) addition
+
+114514
+multiply
+
+114514
+
+229028
+57257
+×
+
+2
+
+sum
+
+arXiv:2407.15360v1 [cs.CL] 22 Jul 2024
+
+Hong Kong University of Science and Technology
+2
+Hong Kong Polytechnic University
+lqiuag@connect.ust.hk, tensor.li,chisu, jason-c.zhang@polyu.edu.hk, leichen@cse.ust.hk
+
+057257
+286285
+
+114514
+
+2944269454
+
+(b) 𝑚 × 𝑢 multiplication
+
+(c) 𝑚 × 𝑚 multiplication
+
+Figure 1: The decomposed steps of (a) addition, (b) multidigit and unit-digit (m×u) multiplication, and (c) multi-digit
+and multi-digit (m × m) multiplication.
+
+Recent years witnessed rapid development of Natural Language Process (NLP). Transformers (Vaswani et al. 2017),
+the core of modern Large Language Models (LLMs), have
+achieved remarkable performance across various tasks include dialogue, chatting, and translation (Vaswani et al.
+2017; Devlin et al. 2018; Raffel et al. 2020; Touvron et al.
+2023; Dziri et al. 2024). The rise and success of recent Large
+Language Models (LLM) like GPT-4 (Achiam et al. 2023)
+and Gemini (Team et al. 2023) have profoundly impacted
+various domains in our society, highlighting new possibilities in Artificial General Intelligence (AGI).
+
+In stark contrast, when we attempt to apply transformers
+to various applications, we encounter difficulties with arithmetic problems, e.g., the modern LLM GPT-4 (Achiam et al.
+2023) even struggles with tasks like simple integer multiplication (Dziri et al. 2024), a basic calculation that is easy for
+human to perform.
+Table 1 shows the accuracy of GPT-4 on integer multiplication tasks. The stark disparity between the remarkable achievements of LLMs on seemingly complex tasks and
+their unexpected shortcomings on trivial ones raise human’s
+concerns about their safe and ethical use, and prompts critical questions about their capabilities.
+Seeking thorough answers to these questions remains an
+open research challenge. In this paper, we offer novel insights into the fundamental limits of transformers, centered
+around arithmetic problem. Arithmetic tasks shows several
+differences from typical natural language tasks. The primary
+distinction lies in following aspects: 1) Data format: in typical NLP tasks, characters are sequentially arranged from
+front to back. Whereas in arithmetic problem like addition
+or multiplication, calculation starts from high digit may increases the difficulty. 2) Intermediate step: arithmetic calculation involves complex intermediate calculation steps, how
+to accurately process the intermediate result is important for
+transformer. 3) The uniqueness: typical NLP tasks allow di-
+
+Copyright © 2025, Association for the Advancement of Artificial
+
+Intelligence (www.aaai.org). All rights reserved.
+
+Introduction
+
+verse outcomes and the model encourages diversified outputs, while arithmetic calculations usually have definite results, diversified outputs may hurt the prediction accuracy.
+4) Data lack: the proportion of arithmetic data in internetcollected training dataset is low, and the data is used only 1
+∼ 2 epoch for training, which may not sufficient for training. These characteristics hinder the efficiency and accuracy
+of transformers in arithmetic tasks. Nonetheless, the unique
+nature of arithmetic tasks provides an excellent opportunity
+to understand and reveal the internal mechanisms of transformer models. In this paper, we focus on the insufficiency
+of transformer in arithmetic problems and investigate possible explanations.
+The advent of eXplainable AI (XAI) enable researchers
+and practitioners to understand the reason behind models’
+predictions, and has significantly mitigated the issues of
+opacity and lack of interpretability inherent in advanced
+machine learning models (Shapley 1951; Petsiuk, Das, and
+Saenko 2018; Chang et al. 2019). By unraveling the internal mechanisms of these models, XAI helps us comprehend their strengths, limitations, and potential failure
+points, thereby facilitating the safe and ethical use, and the
+development of more reliable systems. Transformers have
+demonstrated exceptional performance across a wide range
+of tasks. However, their inherent complexity, such as multilayered self-attention architecture, makes it difficult to understand how they generate specific outputs (Vig 2019). Current transformer-related XAI methods primarily focus on interpretability for specific samples in particular tasks, such as
+indirect object identification (Wang et al. 2022) and Colored Objects(Merullo, Eickhoff, and Pavlick 2023). These
+methods provide valuable insights into the decision-making
+processes of these models. Nonetheless, as tasks grow more
+complex, the intrinsic correlations within these tasks and
+the overall decision-making processes are often overlooked.
+This oversight limits the effectiveness of existing XAI techniques when applied on transformers.
+Previous works (Quirke et al. 2023) analyze a singlelayer transformer model on integer addition task, providing
+a template for examining arithmetic tasks with transformers. While addition is a relatively simple task with few intermediate steps, which cannot fully leverage the capabilities
+of transformers. In this paper, we focus on dissecting more
+complex multiplication task. Fig. 1 visualizes the intermediate steps of addition and multiplication. From the figure, we
+can see that addition shares similar complexity with multiplication with unit-digit multiplier. While the complexity
+of multiplication task increases significantly when extending multiplier to multi-digit. We hence initiated our analysis
+on a simplified version of multiplication, e.g., multi-digit ×
+unit-digit (omitted as m × u), and then extend analysis on
+universal multi-digit × multi-digit (m × m) multiplication.
+We show that the transformer separates the multiplication task into independent subtasks, which are computed
+in parallel. Different subtasks are employed to predict the
+digits in different position in answer numbers. Observations on loss curves indicate a sequential learning order for
+these subtasks. We inferred the model’s deficiencies in handling multiplication tasks based on its attention patterns, and
+
+Table 1: The accuracy (%) of GPT-4 on 1-5 digits multiplications. We use the prompt “What’s the answer of a ∗ b?”.
+The row and column represent the digits of multiplicand and
+multiplier, respectively. Each combination of multiplicand
+and multiplier is tested 100 times.
+# Digits
+
+1
+
+2
+
+3
+
+4
+
+5
+
+1
+
+100
+
+100
+
+100
+
+99
+
+100
+
+2
+
+100
+
+97
+
+95
+
+74
+
+59
+
+3
+
+100
+
+91
+
+60
+
+25
+
+17
+
+4
+
+99
+
+82
+
+29
+
+6
+
+1
+
+5
+
+94
+
+58
+
+13
+
+0
+
+0
+
+confirmed these through experiments. Our findings provide
+valuable insights into understanding and interpreting transformers. These insights may also have broader implications
+for AI safety and reliability. The contribution of this work
+can be summarized as follows,
+• We thoroughly dissect the multiplication task within
+transformers, and provide detailed explanation of transformer’s incapacity on multiplication task, which are
+confirmed through experiments.
+• We proposed targeted enhancements to refine transformer’s incapacity in multiplication. Equipped with
+these enhancements, we achieve 99.9% accuracy with
+tiny transformer.
+• The proposed analysis pipeline contributes to the broader
+fields of model understanding and interpretability, paving
+the way for analyzing more complex tasks and Transformer models.
+
+Related Work
+This work is closely related to transformer and eXplainable
+AI (XAI). This section briefly summarizes those two categories of works.
+
+Transformer
+Transformers (Vaswani et al. 2017) model long-range dependencies among linguistic tokens through self-attention
+mechanism. Due to the outstanding performance in sequence modeling tasks, transformers have been applied to
+a wide range of tasks in natural language processing (Devlin
+et al. 2018; Brown et al. 2020; Taylor et al. 2022; Thoppilan
+et al. 2022; Chung et al. 2024) and computer vision (Radford et al. 2021; Li et al. 2023, 2024). Recent studies try to
+use transformers to solve arithmetic problems. (Qian et al.
+2022) find the limitation of language models in arithmetic
+tasks, and propose to introduce fine-grained computation
+steps to mitigate the limitations of transformer. (Yang et al.
+2023) concentrate on improving the reasoning process and
+teach the model step-by-step. Based on this ideology, they
+trained a model MathGLM, which consists of 2B parameters to perform arithmetic task and outperform GPT4 on
+several arithmetic problems, But the performance is still not
+perfect. (Lee et al. 2023) focused on the data format design
+
+in arithmetic problems. Their finding reveals that using detailed, instructive data with intermediate steps will improve
+accuracy and sample complexity. (Dziri et al. 2024) investigate the limitations of transformer models in representative
+compositional tasks such as multi-digit multiplication. They
+formulate compositional tasks as computation graphs to systematically quantify the level of complexity and find that
+transformer’s performance rapidly decay with increased task
+complexity. Existing methods analyze transformer’s shortcomings in arithmetic tasks based solely on accuracy, without deeply understanding the internal mechanisms of how
+transformers compute these tasks. Moreover, the proposed
+multi-step decomposition refinements significantly reduces
+the training and inference efficiency.
+
+Table 2: Examples of the data format for multiplication. The
+symbol after “=” is what the model needs to predict.
+Data Format
+
+Example
+
+m × u mul
+
+57257 × 2 = 114514
+
+Reversed m × u mul
+
+57257 × 2 = 415411
+
+m × m mul
+
+57257 × 51422 = 2944269454
+
+Reversed m × m mul
+
+57257 × 51422 = 4549624492
+
+(MSA) and Feed-Forward (FF) layers. Initially, the input
+embeddings are combined with positional embeddings:
+xi = xi + Epos
+i .
+
+XAI in Transformer
+The eXplainable AI (XAI) aims to interpret and reverse engineering neural networks and transformers to find meaningful circuits, and has been an area of active research. Recently, numerous XAI studies have emerged to explain the
+decision-making processes of transformers across various
+tasks (Wang et al. 2022; Merullo, Eickhoff, and Pavlick
+2023; Quirke et al. 2023). (Wang et al. 2022) identify
+the function of different attention head and group the attention heads into 7 main classes to to perform indirectobject identification task. (Merullo, Eickhoff, and Pavlick
+2023) propose to adjust the attention heads in middle layers
+to ‘repair’ the transformer’s prediction in Colored Objects
+task. (Quirke et al. 2023) provide a comprehensive analysis of a one-layer transformer on n-digit integer addition
+task through decomposing addition into three base functions
+and analyse the learning condition of each function. (Shen
+et al. 2023) find the reliance on positional information cause
+the transformer model get poor performance on arithmetic
+problems with a small number of digits, and propose corresponding refinement. Existing XAI methods for arithmetic
+tasks have proposed various improvements, significantly enhancing accuracy. However, they lack in-depth analysis of
+how models conduct these tasks. This paper provides a detailed analysis of the model’s computation process, visually
+demonstrating how transformers handle arithmetic tasks and
+proposing improvements to address identified incapabilities.
+
+Method
+
+(1)
+
+The combined embeddings are then passed through MSA
+layer, which captures the importance of each embedding relative to the others and producing contextually enriched embeddings. These enriched embedding are subsequently fed
+into FF layer,
+x = MSA(x) + x,
+(2)
+x = FF(x) + x.
+Finally, the output embeddings are mapped back to words
+through vocabulary table.
+
+Multiplication
+The integer multiplication task has a vast problem and solution space. For 5-digit integer multiplication, this space exceeds 10 billion (100, 000 × 100, 000). Moreover, unlike addition task (Quirke et al. 2023), multiplication involves a series of intermediate steps, especially when dealing with large
+numbers. These complex intermediate steps hinder transformers from predicting accurate products. Even the leading
+language model GPT-4 (Achiam et al. 2023), finds it challenging to handle extensive multiplications (See Table 1). In
+Fig.1, we visualize the intermediate steps of humans completing addition and multiplication tasks. From the figure,
+we observe that the multi-digit × multi-digit (m × m) multiplication is decomposed into several multi-digit × unit-digit
+(m × u) multiplications followed by subsequent addition
+tasks. We begin investigation with m × u multiplication to
+simplify analysis, and then extend to m × m multiplication.
+
+Background
+
+Unit-digit Multiplication Analysis
+
+In this paper, we focus on the integer multiplication task
+within transformer. The input to transformer is a sequence
+of words or symbols, which consists of two n-digit numbers
+′
+D = (Dn−1 , ..., D1 , D0 ) and D′ = (Dn−1
+, ..., D1′ , D0′ ),
+along with operators. Table 2 shows formats of input data.
+The model first converts the input into a sequence of onehot vectors representing the corresponding symbols through
+a vocabulary table of size V . These one-hot vectors are then
+mapped to a sequence of embeddings, x = (x1 , x2 , ..., xL ),
+where xi ∈ Rd is the embedding of i-th word with dimension d, L is the sequence length.
+The transformer processes the input embeddings using a
+series of blocks that consist of Multi-head Self-Attention
+
+In this section, we analyze transformers on m × u multiplication task. Mirroring the way humans calculate multiplication, we assert that the transformer utilizes several basic
+subtasks to complete multiplication.
+• Base Multiply (BM): BM calculates the product of two
+single digits di and d′j at each position. Based on whether
+produce carry to next position, BM can be divided into
+BM (w\carry) and BM (w\o carry).
+• Carry (CA): CA is responsible for calculating the carryover from the previous digit.
+• Use Carry (UC): UC considers the carry from previous
+digit and add the carry to the product at current position.
+
+(a) Overall per-digit loss
+
+(b) BM task (w\o carry)
+
+(c) BM task (w\ carry)
+
+(d) CA task
+
+(e) UC task
+
+(f) UCFC task
+
+Figure 2: Illustrations of (a) the overall per-digit loss curve, and (b-f) per-digit loss curve for each subtask.
+Based on above basic subtasks, transformer can chain multiple subtasks together to achieve complex functionalities,
+e.g., Use Carry and Further Carry (UCFC) considers
+carry from previous column, and further produces carry to
+next column.
+Overall Analysis: We first investigate how transformer
+learns each subtask. Fig. 2(a) shows per-digit training loss
+for each subtask and overall task on 5-digit m × u multiplication. In the figure, “An” denotes the n-th digit in answer
+numbers, “All” denote the overall loss curve for all digits.
+The loss curves in Fig. 2(a) show transformer learns each
+answer digit semi-independently. Digit A0 (units digit) and
+digit A5 are learnt much more quickly than other digits and
+with less noise. This is expected because the calculation of
+A0, the units digit, does not need to consider carry, making it
+simpler than other digits. In contrast to a0, the calculation of
+A5 only needs to consider the carry. The loss curves of A1A4 exhibit similar decline patterns, because the calculation
+complexity of these digit is comparable, e.g., they all need to
+add the carry from previous column to the product at current
+column, and further make carry to next column.
+Per-task Analysis: We then analyse each subtask in
+Fig. 2(b-f). We categorise the training data into nonoverlapping subsets aligned to each subtask and illustrate
+per-digit loss curves for each subtask. To better analysis,
+we visualize the training curves of BM (w\carry) and BM
+(w\o carry) separately. Overviewing Fig. 2(b-f), we can find
+an interesting pattern. At the beginning, all tasks have high
+loss. As the training goes on, all loss curves drop but there
+is a “time lag” between the loss drop of different tasks. The
+curve of BM(w\o carry) drops faster than all other curves.
+This is expected because BM(w\o carry) is the basic of all
+other tasks, it must be accurate before subsequent calculations. The second fastest declining losses are BM (w\carry)
+and Carry loss. These two subtask are learned simultaneously because they are complementary calculation. The convergence of these two task indicates that the model is able to
+
+Window 5
+
+accurately calculate carry. The UC loss exhibits a significant
+plateau phase at the beginning of the training. This plateau
+phase matches our expectation that UC subtask requires accurate calculation of Carry, hence UC loss can only decrease
+after the Carry task converges. UCFC loss decreases the latest, because the computation of UCFC spans 3 digits, e.g.,
+product at current digit, carry from previous digit, and make
+carry to next digit. Therefore, its convergence occurs after
+all other losses converge.
+From the figure, we can also observe that, UCFC’s loss
+curve is much noisier than others. This is because the calculation of UCFC spans 3 digits, inaccuracy in any single
+digit will lead to errors in UCFC. We find that transformer
+has relatively low loss on simple UCFC cases (e.g., the multiplier is 0 or 1). This is because when the multiplier is 0
+or 1, the answer is 0 or the multiplicand itself, reduce calculation difficulty. While transformer encounters high loss
+value when multiplier is other digits, which usually lead to
+cascaded UCFC case, e.g., 47134 × 9 = 424206.
+Reserve Answer Digit: Usually humans calculate multiplication from lower digits. Inspired by this, recent studies
+try to enhance transformer’s accuracy in arithmetic through
+reversing answer digits (Shen et al. 2023; Lee et al. 2023).
+The data formats of reversed digits are shown in Table 2.
+In this section, we validated the effectiveness of reversing
+answer digits and analyzed the principles behind its success.
+We first compare the accuracy of transformer trained on
+ordinal and reversed formats. We denote the transformer
+trained with ordinal and reversed data formats as “ordinal
+transformer” and “reversed transformer, respectively. , The
+results are summarise in Table 3 In the table, the reversed
+transformer consistently achieves superior accuracy across
+different numbers of attention heads. This is because reversed transformer starting calculations from lower digits,
+hence can take advantage of previously generated answer
+digits. When the number of attention head in transformer
+greater exceeds 3, the performance improvement tends to
+
+Table 3: Accuracy (%) of ordinal and reversed format with
+different attention heads.
+#Heads
+
+Ordinal
+
+Reversed
+
+1
+
+66.2
+
+83.6
+
+2
+
+85.3
+
+96.3
+
+3
+
+89.8
+
+99.3
+
+4
+
+90.1
+
+99.3
+
+5
+
+91.1
+
+100
+
+6
+
+91.2
+
+99.9
+
+saturate. This indicates that 3 attention heads are sufficient
+to complete multiplication.
+Next, we investigate the reasons behind the superiority
+of reversed transformer. We visualize the attention heads of
+transformer with heads in Fig. 3. In Fig. 3, “D4” to “=” in
+the left column denote the input tokens, and “A0” to “A5”
+in the right part of attention map denote the predicted answer. Before “=” token is revealed, the model has not seen
+full question and every digit token is independent, the attention maps don’t show regular pattern. The model starts
+to calculate multiplication at 8-th row (corresponding to “=”
+token), and the calculate is completed at 13-row, the last row
+is not used. Both heads in ordinal and reversed transformers
+show a apparent “staircase” pattern, but with different directions. This is expected because the staircase pattern means
+the heads attend to each pair of digits to be multiplied.
+We first analyze ordinal transformer. In Fig. 3(a), the
+heads attend to digits in multiplicand sequentially from left
+to right, and 3 attention heads have 1-token offset from each
+other. We find that each attention head is responsible for different subtasks. For example, to calculate digits A4, the red
+attention head calculate BM on digit D4, the green head focus on Carry at D3, The blue head be responsible for. . . the
+UCFC computation at D3 (cross D2 to D4 digits). The information from 3 heads is combined in the subsequent MLP
+layer to generate the final answer digit A4. While the calculation of first answer digit A5 does not need BM of red head,
+and last digit A0 does not consider Carry from previous column. The attention map also point out the reason why transformer struggles with handling cascaded UCFC task: transformer only focus 3 continuous tokens in input sequence,
+while the calculation of cascaded UCFC need at least 4 tokens. We then validated the function of each head through
+ablation experiments. When we invalidate the red head, the
+loss of BM task increase significantly. While ablate green
+and blue head has little influence on BM task. Similar conclusions can be observed in the other subtasks as well. This
+indicates that each attention head has a well-defined role.
+We then focus on reversed transformer. In Fig. 3(b) the
+reversed transformer exhibits opposite attention pattern, the
+model attends to digits in a staircase pattern from right to
+left. Each attention head in reversed transformer is also responsible for different subtasks. The blue head is responsible
+for BM calculation. The red head calculate the carry from
+previous column. Different from ordinal transformer, the re-
+
+D4
+D3
+D2
+D1
+D0
+×
+D0’
+=
+
+A5
+A4
+A3
+A2
+A1
+A0
+
+A4 = (D4×D0
++ D3×D0’ // 10
++ UCFC) mod 10
+
+(a) Ordinal
+
+D4
+D3
+D2
+D1
+D0
+×
+D0’
+=
+
+A0
+A1
+A2
+A3
+A4
+A5
+
+A4 = (D4×D0
++ D3×D0’ // 10
++ Cascaded UCFC) mod 10
+
+(b) Reversed
+
+Figure 3: Attention map of ordinal and reversed answer digit
+format. To predict answer digit, the multiple attention heads
+are responsible for different tasks and combine the information in subsequent MLP layers.
+versed transformer could access to previously generated answer digits, hence green head mainly focus on previous answer digits and is responsible for calculating cascaded carry.
+This attention patterns also explains why the reversed transformer performs better: the reversed transformer can better
+utilize the already generated digits to calculate the remaining
+results, hence can better handle the cascaded UCFC cases.
+Finally, we investigate transformers with fewer or more
+than 3 attention heads. We found that in the transformer with
+less than 3 heads, each head handles plural subtasks. Conversely, when there are more than 3 heads, multiple heads
+end up performing the same function.
+
+Multi-digit Multiplication Analysis
+In this section, we extend analysis to m × m multiplication task. When we conducting m × m multiplication, we
+encountered a significant accuracy drop with either ordinal
+or reversed transformer. In following part, we analyzed the
+reasons for the transformer’s incapacity in the m × m multiplication task and propose potential solutions.
+Analysis: We first investigate per-digit accuracy of ordinal and reversed transformers on m × m multiplication task
+with different multiplier formats. The experimental results
+are summarised in Table 4. The first column in Table 4 denotes the multiplier format, e.g., “0000d” denotes a 5-digit
+number with only unit-digit unfixed, e.g., d ∈ {0, 1, ..., 9},
+while other digits fixed as zero value. And “000dd” denotes
+the unit-digit and tens-digit are not fixed. All the multiplicands are regular five-digit numbers.
+
+Table 4: Overall and per-digit accuracy (%) of ordinal and reversed transformer with different multiplier formats.
+Multiplier
+
+Ordinal
+A8
+
+A7
+
+A6
+
+A5
+
+Reversed
+
+Format
+
+overall A9
+
+0000d
+
+85.3
+
+100 100 100 100 98.4 95.4 94.4 94.9 99.6 100 99.3
+
+A4
+
+A3
+
+A2
+
+A1 A0 overall A9
+
+100 100 100 100 99.9 99.8 99.8 99.8 99.9 100
+
+A8
+
+A7
+
+A6
+
+A5
+
+A4
+
+A3
+
+A2
+
+A1 A0
+
+d000d
+
+16.8 98.6 96.9 95.2 85.1 40.2 28.6 96.0 96.4 99.5 100 22.0
+
+100 99.8 99.8 96.2 42.5 34.4 99.9 99.9 100 100
+
+000dd
+
+5.2
+
+100 100 100 93.8 45.2 21.6 19.6 20.0 32.0 100
+
+8.1
+
+100 100 100 99.9 40.6 20.8 20.4 21.7 40.5 100
+
+00ddd
+
+0.2
+
+100 100 94.3 43.1 13.4 11.3 10.8 12.4 31.6 100
+
+0.4
+
+100 100 99.9 36.8 11.5 10.9 10.6 12.9 40.0 100
+
+0dddd
+
+0
+
+100 95.2 44.4 11.8 10.0 10.4 9.3 12.4 31.4 100
+
+0.1
+
+100 98.7 32.5 11.2 9.9 10.5 10.2 13.6 38.0 100
+
+ddddd
+
+0
+
+91.3 39.9 13.4 10.5 9.9 9.5 10.5 12.3 32.6 100
+
+0
+
+99.5 32.5 11.9 10.5 10.4 9.5 10.5 13.4 36.3 100
+
+57257
+×51422
+57257
+×50002
+114514
+286285
+2862964514
+(a) 𝑑000𝑑
+
+57257
+×00022
+114514
+114514
+0001259654
+(b) 000𝑑𝑑
+
+114514
+114514
+229028
+057257
+286285
+2944269454
+(c) 𝑑𝑑𝑑𝑑𝑑
+
+Figure 4: The overlap of per-digit product with different
+multiplier format. The darker the color, the more overlapping digits there are.
+
+It can be observed in Table 4 that, using multiplier with
+only unit digit non-fixed, e.g., 0000d, both ordinal and reversed transformers achieve high accuracy at all answer digits A0-A9. The intermediate digits exhibit slightly lower accuracy, e.g., A1-A5, this is because these intermediate digits
+require extra carry calculation, which is not exist in unit digit
+A0. The table also shows that reversed transformer achieves
+better accuracy on digit A1-A5, indicating its superiority in
+carry calculation.
+We then explored the cases where the multiplier has more
+than one non-fixed digits, which corresponding 2-6 row in
+Table 4. In the table, we observed that when there is an overlap between the intermediate products of multiplicand and
+each digit in multiplier, the accuracy of answer digits decreases. And the more digits overlap at the digit, the lower
+the accuracy at that digit. For example, in ddddd × ddddd,
+the digits A4 and A5 need to consider all intermediate products, hence have the lowest accuracy. Fig. 4 visualize the
+overlap of intermediate products with different multiplier
+formats, the darker color denotes more overlap exists in this
+position. In Fig. 4(a), A4 and A5 in answer digits have overlap from 2 per-digit products, which corresponding to the
+accuracy decrease of A4 and A5 of 2-nd row in Table 4. The
+darker color in Fig. 4(c) also match the accuracy decrease in
+the last row of Table 4. This indicates that single-layer transformer lacks the capacity to handle the multiple intermediate
+step in m × m multiplication task.
+Additionally, when we apply the transformer trained on
+
+Table 5: Effectiveness of each refinement on m × m multiplication task.
+Method
+
+Acc.
+
+baseline
+
+0.0
+
+baseline + reverse
+
+0.0
+
+baseline + depth
+
+1.6
+
+baseline + sample
+
+0.0
+
+baseline + depth + reverse
+
+8.7
+
+baseline + depth + sample
+
+64.9
+
+baseline + depth + reverse + sample
+
+99.9
+
+m × m task to m × u task, we suffer severe accuracy drop.
+This indicates directly train transformer on challenging m ×
+m task prevents it from learning even basic multiplication
+rules, hence resulting in poor performance on simpler m × u
+multiplication task.
+Refinement: Based on above analysis, we identified the
+reasons for the inferior accuracy of transformer on m × m
+multiplication task: 1) The ordinal answer digit format increase the difficulty for the transformer to calculate carries.
+2) The m × m task involves multiple steps of calculation,
+requiring deeper model to store intermediate results. 3) Directly using complex m × m data for training increases the
+learning difficulty for the model.
+We addressed above limitations to enhance transformer’s
+ability on arithmetic task in following aspects, 1) Reversing
+the answer digits to enable the transformer can better calculate the carry. 2) Increase model depth to handle more intermediate steps. 3) Increase the proportion of simple samples
+during training to allow the model to learn progressively.
+(The simple sample is defined as multiplier with only 1 digit
+unfix, while other digits are fixed as 0).
+We first verify the effectiveness of above 3 refinement and
+the experimental results are summarised in Table 5. In the table, “reverse” refers to reversing the answer digits, “depth”
+denotes increase the transformer depth, and “sample” denotes increase the proportion of simple samples. In the table, solely “reverse” or “sample” also bring no promotion.
+This is because the model’s capacity is not enough for the
+
+m×u
+
+# Layers
+
+m×m
+
+Ordinal
+
+Reversed
+
+Ordinal
+
+Reversed
+
+1
+
+85.3
+
+99.3
+
+0.0
+
+0.0
+
+2
+
+92.3
+
+99.9
+
+0.0
+
+33.6
+
+4
+
+92.7
+
+99.8
+
+7.5
+
+97.4
+
+8
+
+95.5
+
+99.8
+
+64.9
+
+99.6
+
+12
+
+95.1
+
+99.9
+
+79.1
+
+99.9
+
+complex intermediate steps. Increasing model depth bring
+limited accuracy promotion. When we combine “depth”
+and “reverse”, we observed a slightly higher accuracy, e.g.,
+8.7%. This shows deep model trained with reverse format is beneficial. Increase the proportion of simple samples
+bring significant accuracy promotion. This shows progressive learning reduce the overall training difficulty. When we
+combine all 3 refinements, we achieve remarkable accuracy.
+This experiment indicates the effectiveness of 3 improvements.
+Depth Analysis: In this part, we further analyzed the impact of model depth. Table 6 shows the accuracy of transformer models with different layers on m × u and m × m
+multiplication tasks, respectively. The single-layer transformer only performs well on m × u multiplication task, but
+it suffers failure on more complex m × m task. This is because single-layer model’s capacity is insufficient to handle
+intermediate steps. Increasing model depth bring significant
+accuracy promotion on m × m task for both ordinal and reversed transformer. The performance promotion of reverse
+transformer began to saturate at depth of 4, while ordinal
+transformer does not reach saturation even at depth of 12.
+This is because the ordinal model cannot utilize the previously generated answer digits, hence the calculation of each
+digit needs to consider more information and involves more
+intermediate step, necessitating a deeper model.
+Simple Sample Proportion: We then investigate the influence of simple sample proportion. We visualize the accuracy of ordinal and reversed transformers in Fig. 5. The
+x-axis represents the proportion of simple samples. From
+the figure, we can see that both too many and too few simple samples are detrimental to model’s learning. Too few
+simple samples make it difficult for the model to learn the
+basic rules of multiplication, while too many simple samples cause the model lack the ability to handle more difficult
+ones. This highlights the importance of setting an appropriate proportion of simple samples.
+
+Analysis of LLMs’ incapability in Arithmetic
+Based on experiments and analysis in this paper, we tried to
+analyze to possible reasons for the suboptimal performance
+of current LLMs on arithmetic tasks.
+• Data format: existing LLMs are trained on internet-
+
+Accuracy (%)
+
+Table 6: Accuracy (%) of ordinal and reversed transformer
+with different depth.
+
+100
+75
+50
+25
+0
+
+Ordinal
+
+Reversed
+
+0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1
+Proportion of simple samples (%)
+
+Figure 5: Accuracy (%) of ordinal and reversed transformer
+trained with different proportion of simple samples.
+collected data, in which the digits are usually presented
+in ordinal order, increases models’ learning difficulty.
+• Data lack: the internet-collected training data contains
+few arithmetic samples, and most of the data is used
+for only 1-2 epochs. Moreover, the proportion of simple data is insufficient. This makes it difficult for LLMs
+to learn the basic rules of arithmetic tasks progressively
+from easy to difficult.
+• Output diversity : typical NLP tasks allow more diverse
+outcomes and the model encourages diversified outputs,
+while arithmetic calculations usually have definite results.
+• Tokenizer: in some LLMs’ tokenizer processes, multiple
+characters are packaged as a single token , e.g., in GPT4, the input arithmetic formula “12345 × 857” is divided
+into “123”, “45”, “×” and “857”. This tokenizer further
+increases the difficulty for LLMs.
+
+Implementation Details
+Training: We start analysis with single layer decoder-only
+transformer on m × u task and extend to multi-layer transformer on m × m task. Our training consists of 2000 iterations with batch size 64. Each digit in training data is sampled independently from a uniform distribution {0,1,...,9}.
+We use Adam optimizer and the learning rate is set as 1e-4.
+Inference: During inference, the input consists of multiplicand, times sign, multiplier and equal sign, e.g., “12345×
+54321 =”. The model generate each digit of product answer in an autoregressive manner. The autoregressive process stops when generating the final digit. We test on 1 million randomly sampled data which not appear in training set.
+
+Conclusion
+In this paper, we focused on the limitations of transformers
+in arithmetic problems and propose a integrated pipeline to
+elucidate the internal mechanism of transformer. We visually analyzed the process of how transformers perform multiplication tasks. Our experiments show that transformers
+decompose the multiplication task into multiple parallel subtasks. The learning of these subtasks follows a certain order
+and each subtask is handled by different attention heads. Our
+We found that the reason transformers struggle with arithmetic tasks and propose targeted solutions to address these
+issues. The proposed explainability pipeline contributes to
+the broader fields of model understanding and interpretability, we believe it will pave the way for analyzing more complex tasks and transformer models.
+
+References
+Achiam, J.; Adler, S.; Agarwal, S.; Ahmad, L.; Akkaya, I.;
+Aleman, F. L.; Almeida, D.; Altenschmidt, J.; Altman, S.;
+Anadkat, S.; et al. 2023. Gpt-4 technical report. arXiv
+preprint arXiv:2303.08774.
+Brown, T.; Mann, B.; Ryder, N.; Subbiah, M.; Kaplan, J. D.;
+Dhariwal, P.; Neelakantan, A.; Shyam, P.; Sastry, G.; Askell,
+A.; et al. 2020. Language models are few-shot learners. Advances in neural information processing systems, 33: 1877–
+1901.
+Chang, C.-H.; Creager, E.; Goldenberg, A.; and Duvenaud,
+D. 2019. Explaining Image Classifiers by Counterfactual
+Generation. arXiv:1807.08024.
+Chung, H. W.; Hou, L.; Longpre, S.; Zoph, B.; Tay, Y.; Fedus, W.; Li, Y.; Wang, X.; Dehghani, M.; Brahma, S.; et al.
+2024. Scaling instruction-finetuned language models. Journal of Machine Learning Research, 25(70): 1–53.
+Devlin, J.; Chang, M.-W.; Lee, K.; and Toutanova, K. 2018.
+Bert: Pre-training of deep bidirectional transformers for language understanding. arXiv preprint arXiv:1810.04805.
+Dziri, N.; Lu, X.; Sclar, M.; Li, X. L.; Jiang, L.; Lin, B. Y.;
+Welleck, S.; West, P.; Bhagavatula, C.; Le Bras, R.; et al.
+2024. Faith and fate: Limits of transformers on compositionality. Advances in Neural Information Processing Systems,
+36.
+Lee, N.; Sreenivasan, K.; Lee, J. D.; Lee, K.; and Papailiopoulos, D. 2023. Teaching arithmetic to small transformers. arXiv preprint arXiv:2307.03381.
+Li, J.; Li, D.; Savarese, S.; and Hoi, S. 2023. Blip-2: Bootstrapping language-image pre-training with frozen image
+encoders and large language models. In International conference on machine learning, 19730–19742. PMLR.
+Li, Y.; Zhang, Y.; Wang, C.; Zhong, Z.; Chen, Y.; Chu, R.;
+Liu, S.; and Jia, J. 2024. Mini-gemini: Mining the potential
+of multi-modality vision language models. arXiv preprint
+arXiv:2403.18814.
+Merullo, J.; Eickhoff, C.; and Pavlick, E. 2023. Circuit component reuse across tasks in transformer language models.
+arXiv preprint arXiv:2310.08744.
+Petsiuk, V.; Das, A.; and Saenko, K. 2018. Rise: Randomized input sampling for explanation of black-box models.
+arXiv preprint arXiv:1806.07421.
+Qian, J.; Wang, H.; Li, Z.; Li, S.; and Yan, X. 2022. Limitations of language models in arithmetic and symbolic induction. arXiv preprint arXiv:2208.05051.
+Quirke, P.; et al. 2023. Understanding addition in transformers. arXiv preprint arXiv:2310.13121.
+Radford, A.; Kim, J. W.; Hallacy, C.; Ramesh, A.; Goh, G.;
+Agarwal, S.; Sastry, G.; Askell, A.; Mishkin, P.; Clark, J.;
+et al. 2021. Learning transferable visual models from natural language supervision. In International conference on
+machine learning, 8748–8763. PMLR.
+Raffel, C.; Shazeer, N.; Roberts, A.; Lee, K.; Narang, S.;
+Matena, M.; Zhou, Y.; Li, W.; and Liu, P. J. 2020. Exploring the limits of transfer learning with a unified text-to-text
+
+transformer. Journal of machine learning research, 21(140):
+1–67.
+Shapley, L. S. 1951. Notes on the n-person game—ii: The
+value of an n-person game.
+Shen, R.; Bubeck, S.; Eldan, R.; Lee, Y. T.; Li, Y.; and
+Zhang, Y. 2023. Positional description matters for transformers arithmetic. arXiv preprint arXiv:2311.14737.
+Taylor, R.; Kardas, M.; Cucurull, G.; Scialom, T.; Hartshorn,
+A.; Saravia, E.; Poulton, A.; Kerkez, V.; and Stojnic, R.
+2022. Galactica: A large language model for science. arXiv
+preprint arXiv:2211.09085.
+Team, G.; Anil, R.; Borgeaud, S.; Wu, Y.; Alayrac, J.-B.;
+Yu, J.; Soricut, R.; Schalkwyk, J.; Dai, A. M.; Hauth, A.;
+et al. 2023. Gemini: a family of highly capable multimodal
+models. arXiv preprint arXiv:2312.11805.
+Thoppilan, R.; De Freitas, D.; Hall, J.; Shazeer, N.; Kulshreshtha, A.; Cheng, H.-T.; Jin, A.; Bos, T.; Baker, L.; Du,
+Y.; et al. 2022. Lamda: Language models for dialog applications. arXiv preprint arXiv:2201.08239.
+Touvron, H.; Lavril, T.; Izacard, G.; Martinet, X.; Lachaux,
+M.-A.; Lacroix, T.; Rozière, B.; Goyal, N.; Hambro, E.;
+Azhar, F.; et al. 2023. Llama: Open and efficient foundation language models. arXiv preprint arXiv:2302.13971.
+Vaswani, A.; Shazeer, N.; Parmar, N.; Uszkoreit, J.; Jones,
+L.; Gomez, A. N.; Kaiser, Ł.; and Polosukhin, I. 2017. Attention is all you need. Advances in neural information processing systems, 30.
+Vig, J. 2019. A multiscale visualization of attention in the
+transformer model. arXiv preprint arXiv:1906.05714.
+Wang, K.; Variengien, A.; Conmy, A.; Shlegeris, B.; and
+Steinhardt, J. 2022. Interpretability in the wild: a circuit for
+indirect object identification in gpt-2 small. arXiv preprint
+arXiv:2211.00593.
+Yang, Z.; Ding, M.; Lv, Q.; Jiang, Z.; He, Z.; Guo, Y.; Bai,
+J.; and Tang, J. 2023. Gpt can solve mathematical problems
+without a calculator. arXiv preprint arXiv:2309.03241.
+
+
