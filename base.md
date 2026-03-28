@@ -7,6 +7,7 @@
 
 @AdderBoard/README.md 에서 Learderboard 에서 Hand-Coded Weights와 Trained Weights 각각에서 상위권 5개의 architecture와 key tricks 방식에서 idea를 받아 적용해보자.
 
+이제 시간이 얼마 남지 않아 최종 결과물(problem.md)을 뽑아야 한다. 
 Report 작성할 때 아래의 사항들을 포함해야 하니 필요한 결과들을 미리 코드에 반영시켜놔.
 
 아키텍처 설명. 트랜스포머의 구조를 도식화하세요: 레이어 수, 헤드 수, 히든 차원, 위치 인코딩 유형, 활성화 함수, 가중치 공유 방식.

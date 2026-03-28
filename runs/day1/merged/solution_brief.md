@@ -5,7 +5,7 @@
 - Day: day1
 - Solution owner: Codex Builder
 - Based on: `runs/day1/raw_problem/problem.md`, `runs/day1/codex/parser.md`, `runs/day1/claude/parser.md`, `runs/day1/claude/strategist.md`, `runs/day1/claude/critic.md`
-- Version: v0.2
+- Version: v0.3
 - Status: Claude independent pass partially completed, then transferred to Codex due to session-usage limit; Codex now owns integrated execution path
 
 # Objective
@@ -68,9 +68,14 @@
 - it raises bit accuracy to about `0.638`,
 - increases `pred1` across most positions relative to candidate 5,
 - but still underpredicts `1`s in the low/mid band `P02` to `P08`, so exact-match remains around `0.032`.
+- Codex then tested three candidate-6-derived variants under the same diagnostic style on the user-validated `conda run -n wslim python ...` GPU path:
+- candidate 7 (`182` params, output-position bias) raised low/mid `pred1` most strongly and reached `0.6398` bit accuracy at 3 epochs, but it simultaneously collapsed `P00`, `P10`, and `P11`; at 10 epochs it still stayed below control on exact-match (`0.0300` vs control `~0.0317`).
+- candidate 8 (`198` params, output-position bias + 2 heads + untied attention output) matched control exact-match at 3 epochs (`0.0322`) but did not improve bit accuracy and severely underpredicted `P08`, `P10`, and `P11`.
+- candidate 9 (`214` params, output-position bias + 2 heads + separate `K/V/O`) did not beat control on either exact-match or bit accuracy.
+- Measured conclusion: the new variants can redistribute `pred1`, but none improved the main control in a stable way; the current problem is not “too few ones everywhere” so much as “ones moved into the wrong bits.”
 
 # Immediate Next Actions
 
-1. Promote candidate 6 as the current `Problem 1-2` control because it reduces underprediction without changing the training protocol.
-2. Target the remaining low/mid-bit one-rate gap (`P02` to `P08`) rather than adding more generic width.
+1. Keep candidate 6 as the current `Problem 1-2` control; none of candidates 7 to 9 beat it on stable all-pairs diagnostics.
+2. Target the remaining low/mid-bit one-rate gap (`P02` to `P08`) with more selective calibration changes, because naive output-position bias fixed some middle bits by breaking edge bits.
 3. Keep Claude's strategist/critic output as reference only; route all further implementation and verification through Codex to avoid split ownership.

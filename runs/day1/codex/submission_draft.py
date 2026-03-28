@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
 import torch
@@ -97,6 +99,207 @@ def all_pairs() -> List[Tuple[int, int]]:
 def random_pairs(count: int, seed: int) -> List[Tuple[int, int]]:
     rng = random.Random(seed)
     return [(rng.randrange(64), rng.randrange(64)) for _ in range(count)]
+
+
+def architecture_summary(
+    config: ModelConfig,
+    parameter_count: int,
+    candidate_index: int | None = None,
+) -> dict:
+    tying = []
+    if config.tie_o_to_q:
+        tying.append("attention output tied to Q^T")
+    if config.tie_output_head:
+        tying.append("token embedding tied to lm head")
+    else:
+        tying.append("untied lm head")
+    if config.share_norm:
+        tying.append("shared RMSNorm")
+    else:
+        tying.append("separate RMSNorm")
+    if config.attention_style == "k_eq_v":
+        tying.append("K=V attention")
+    elif config.attention_style == "k_rot_q":
+        tying.append("K=rot(Q), V=Q attention")
+    elif config.attention_style == "phase_tied":
+        tying.append("phase-tied query routing")
+    if config.use_output_pos_bias:
+        tying.append("per-output-position logit bias")
+
+    positional_encoding = [f"RoPE(theta={config.rope_theta})"]
+    if config.use_fixed_pe:
+        positional_encoding.append("fixed sinusoidal residual PE")
+
+    description = (
+        f"{config.n_layers}-layer decoder-only transformer with d_model={config.d_model}, "
+        f"{config.n_heads} head(s) of width {config.head_dim}, ffn_dim={config.ffn_dim}, "
+        f"{config.activation} MLP, {config.embedding_style} binary embedding, "
+        f"{config.attention_style} attention, and {', '.join(positional_encoding)}."
+    )
+
+    return {
+        "candidate_index": candidate_index,
+        "parameter_count": parameter_count,
+        "layers": config.n_layers,
+        "heads": config.n_heads,
+        "head_dim": config.head_dim,
+        "hidden_dim": config.d_model,
+        "ffn_dim": config.ffn_dim,
+        "embedding_style": config.embedding_style,
+        "attention_style": config.attention_style,
+        "activation": config.activation,
+        "positional_encoding": positional_encoding,
+        "weight_tying": tying,
+        "dropout": config.dropout,
+        "description": description,
+        "config": asdict(config),
+    }
+
+
+def write_json(path: Path, payload: dict | list) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2))
+
+
+def write_csv(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        path.write_text("")
+        return
+    columns = list(rows[0].keys())
+    lines = [",".join(columns)]
+    for row in rows:
+        values = []
+        for column in columns:
+            value = row[column]
+            if isinstance(value, float):
+                values.append(f"{value:.8f}")
+            else:
+                values.append(str(value))
+        lines.append(",".join(values))
+    path.write_text("\n".join(lines) + "\n")
+
+
+def build_profile_rows(report: dict) -> list[dict]:
+    rows = []
+    for bit in report["bits"]:
+        row = {
+            "bit": bit["bit"],
+            "accuracy": bit["accuracy"],
+            "false_positive_rate": bit["false_positive_rate"],
+            "false_negative_rate": bit["false_negative_rate"],
+            "pred_one_rate": bit["pred_one_rate"],
+            "target_one_rate": bit["target_one_rate"],
+            "first_wrong_count": report["first_wrong"][bit["bit"]],
+        }
+        avg_prob_one = bit.get("avg_prob_one")
+        if avg_prob_one is not None:
+            row["avg_prob_one"] = avg_prob_one
+        rows.append(row)
+    return rows
+
+
+def write_report_bundle(
+    output_dir: str,
+    architecture: dict,
+    run_args: dict,
+    history: list[dict],
+    greedy_report: dict | None = None,
+    teacher_forced_report: dict | None = None,
+    comparison_rows: list[dict] | None = None,
+) -> None:
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    bundle = {
+        "architecture": architecture,
+        "run_args": run_args,
+        "history": history,
+        "problem_1_1_status": {
+            "supported": False,
+            "parameter_count": -1,
+            "note": "No proof-backed hand-coded Problem 1-1 weights are implemented in this file yet.",
+        },
+    }
+    if greedy_report is not None:
+        greedy_exact_match = greedy_report["exact_matches"] / max(1, greedy_report["total_cases"])
+        greedy_bit_accuracy = sum(bit["accuracy"] for bit in greedy_report["bits"]) / OUTPUT_BITS
+        bundle["greedy_eval"] = {
+            "exact_match": greedy_exact_match,
+            "bit_accuracy": greedy_bit_accuracy,
+            "report": greedy_report,
+        }
+    if teacher_forced_report is not None:
+        teacher_exact_match = teacher_forced_report["exact_matches"] / max(
+            1, teacher_forced_report["total_cases"]
+        )
+        teacher_bit_accuracy = (
+            sum(bit["accuracy"] for bit in teacher_forced_report["bits"]) / OUTPUT_BITS
+        )
+        bundle["teacher_forced_eval"] = {
+            "exact_match": teacher_exact_match,
+            "bit_accuracy": teacher_bit_accuracy,
+            "report": teacher_forced_report,
+        }
+    if comparison_rows is not None:
+        bundle["candidate_comparison"] = comparison_rows
+
+    write_json(out / "report_bundle.json", bundle)
+    write_json(out / "architecture.json", architecture)
+    write_csv(out / "training_curve.csv", history)
+    if greedy_report is not None:
+        write_csv(out / "greedy_bit_profile.csv", build_profile_rows(greedy_report))
+    if teacher_forced_report is not None:
+        write_csv(
+            out / "teacher_forced_bit_profile.csv",
+            build_profile_rows(teacher_forced_report),
+        )
+    if comparison_rows is not None:
+        write_csv(out / "candidate_size_accuracy.csv", comparison_rows)
+
+    summary_lines = [
+        "# Report Bundle",
+        "",
+        "## Architecture",
+        architecture["description"],
+        "",
+        f"- Parameters: {architecture['parameter_count']}",
+        f"- Layers: {architecture['layers']}",
+        f"- Heads: {architecture['heads']}",
+        f"- Hidden dim: {architecture['hidden_dim']}",
+        f"- FFN dim: {architecture['ffn_dim']}",
+        f"- Positional encoding: {', '.join(architecture['positional_encoding'])}",
+        f"- Weight tying: {', '.join(architecture['weight_tying'])}",
+        "",
+        "## Problem 1-1 Status",
+        "- No proof-backed hand-coded solution is implemented yet in this file.",
+        "- If unchanged, Problem 1-1 should be reported as `P_1 = -1`.",
+    ]
+    if history:
+        summary_lines.extend(
+            [
+                "",
+                "## Training Curve",
+                "- Saved as `training_curve.csv` with epoch, lr, train_loss, exact_match, bit_accuracy.",
+            ]
+        )
+    if comparison_rows is not None:
+        summary_lines.extend(
+            [
+                "",
+                "## Model Size vs Accuracy",
+                "- Saved as `candidate_size_accuracy.csv` for direct report plotting.",
+            ]
+        )
+    if greedy_report is not None or teacher_forced_report is not None:
+        summary_lines.extend(
+            [
+                "",
+                "## Ablation / Error Analysis",
+                "- Saved per-bit profiles include `pred_one_rate`, `false_negative_rate`, and `first_wrong_count`.",
+            ]
+        )
+    (out / "report_summary.md").write_text("\n".join(summary_lines) + "\n")
 
 
 @dataclass(frozen=True)
@@ -866,7 +1069,7 @@ def train_model(
     return model, device, (optimizer, scheduler, train_loader)
 
 
-def run_demo_train(
+def fit_model_with_history(
     config: ModelConfig,
     train_size: int,
     eval_size: int,
@@ -874,7 +1077,7 @@ def run_demo_train(
     batch_size: int,
     seed: int,
     eval_all_pairs: bool = False,
-) -> None:
+) -> tuple[nn.Module, torch.device, list[dict], list[Tuple[int, int]]]:
     model, device, train_parts = train_model(
         config=config,
         train_size=train_size,
@@ -885,19 +1088,77 @@ def run_demo_train(
     optimizer, scheduler, train_loader = train_parts
     eval_pairs = build_eval_pairs(eval_size, seed, eval_all_pairs)
 
-    print(f"config={config}")
-    print(f"parameters={unique_parameter_count(model)}")
+    history = []
     for epoch in range(1, epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, device)
         accuracy = exact_match_accuracy(model, eval_pairs, device)
         bit_accuracy = bitwise_accuracy(model, eval_pairs, device)
         current_lr = optimizer.param_groups[0]["lr"]
+        history.append(
+            {
+                "epoch": epoch,
+                "lr": current_lr,
+                "train_loss": train_loss,
+                "exact_match": accuracy,
+                "bit_accuracy": bit_accuracy,
+            }
+        )
         print(
             f"epoch={epoch} lr={current_lr:.6f} "
             f"train_loss={train_loss:.4f} exact_match={accuracy:.4f} "
             f"bit_accuracy={bit_accuracy:.4f}"
         )
         scheduler.step()
+    return model, device, history, eval_pairs
+
+
+def run_demo_train(
+    config: ModelConfig,
+    train_size: int,
+    eval_size: int,
+    epochs: int,
+    batch_size: int,
+    seed: int,
+    eval_all_pairs: bool = False,
+    candidate_index: int | None = None,
+    save_report_dir: str | None = None,
+) -> None:
+    print(f"config={config}")
+    model, device, history, eval_pairs = fit_model_with_history(
+        config=config,
+        train_size=train_size,
+        eval_size=eval_size,
+        epochs=epochs,
+        batch_size=batch_size,
+        seed=seed,
+        eval_all_pairs=eval_all_pairs,
+    )
+    parameter_count = unique_parameter_count(model)
+    print(f"parameters={parameter_count}")
+    if save_report_dir is not None:
+        greedy_report = per_bit_profile(model, eval_pairs, device)
+        teacher_forced_report = teacher_forced_bit_profile(
+            model, eval_pairs, device, batch_size=batch_size
+        )
+        write_report_bundle(
+            output_dir=save_report_dir,
+            architecture=architecture_summary(
+                config, parameter_count, candidate_index=candidate_index
+            ),
+            run_args={
+                "mode": "demo_train",
+                "train_size": train_size,
+                "eval_size": eval_size,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "seed": seed,
+                "eval_all_pairs": eval_all_pairs,
+                "device": str(device),
+            },
+            history=history,
+            greedy_report=greedy_report,
+            teacher_forced_report=teacher_forced_report,
+        )
 
 
 def print_bit_report(report: dict, label: str) -> None:
@@ -926,6 +1187,8 @@ def run_bit_analysis(
     batch_size: int,
     seed: int,
     eval_all_pairs: bool = False,
+    candidate_index: int | None = None,
+    save_report_dir: str | None = None,
 ) -> None:
     model, device, train_parts = train_model(
         config=config,
@@ -939,12 +1202,23 @@ def run_bit_analysis(
     final_eval_pairs = build_eval_pairs(eval_size, seed, eval_all_pairs)
 
     print(f"config={config}")
-    print(f"parameters={unique_parameter_count(model)}")
+    parameter_count = unique_parameter_count(model)
+    print(f"parameters={parameter_count}")
+    history = []
     for epoch in range(1, epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, device)
         accuracy = exact_match_accuracy(model, epoch_eval_pairs, device)
         bit_accuracy = bitwise_accuracy(model, epoch_eval_pairs, device)
         current_lr = optimizer.param_groups[0]["lr"]
+        history.append(
+            {
+                "epoch": epoch,
+                "lr": current_lr,
+                "train_loss": train_loss,
+                "exact_match": accuracy,
+                "bit_accuracy": bit_accuracy,
+            }
+        )
         print(
             f"epoch={epoch} lr={current_lr:.6f} "
             f"train_loss={train_loss:.4f} exact_match={accuracy:.4f} "
@@ -975,6 +1249,97 @@ def run_bit_analysis(
     )
     print_bit_report(report, label="greedy")
     print_bit_report(teacher_forced_report, label="teacher_forced")
+    if save_report_dir is not None:
+        write_report_bundle(
+            output_dir=save_report_dir,
+            architecture=architecture_summary(
+                config, parameter_count, candidate_index=candidate_index
+            ),
+            run_args={
+                "mode": "analyze_bits",
+                "train_size": train_size,
+                "eval_size": eval_size,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "seed": seed,
+                "eval_all_pairs": eval_all_pairs,
+                "device": str(device),
+            },
+            history=history,
+            greedy_report=report,
+            teacher_forced_report=teacher_forced_report,
+        )
+
+
+def run_report_candidate_sweep(
+    candidate_indices: list[int],
+    train_size: int,
+    eval_size: int,
+    epochs: int,
+    batch_size: int,
+    seed: int,
+    eval_all_pairs: bool,
+    output_dir: str,
+) -> None:
+    comparison_rows = []
+    for offset, candidate_index in enumerate(candidate_indices):
+        config = get_config(candidate_index)
+        print(f"report_sweep_candidate_index={candidate_index}")
+        model, device, history, eval_pairs = fit_model_with_history(
+            config=config,
+            train_size=train_size,
+            eval_size=eval_size,
+            epochs=epochs,
+            batch_size=batch_size,
+            seed=seed + offset,
+            eval_all_pairs=eval_all_pairs,
+        )
+        greedy_report = per_bit_profile(model, eval_pairs, device)
+        parameter_count = unique_parameter_count(model)
+        comparison_rows.append(
+            {
+                "candidate_index": candidate_index,
+                "parameters": parameter_count,
+                "layers": config.n_layers,
+                "heads": config.n_heads,
+                "hidden_dim": config.d_model,
+                "ffn_dim": config.ffn_dim,
+                "exact_match": greedy_report["exact_matches"] / max(1, greedy_report["total_cases"]),
+                "bit_accuracy": sum(bit["accuracy"] for bit in greedy_report["bits"]) / OUTPUT_BITS,
+                "embedding_style": config.embedding_style,
+                "attention_style": config.attention_style,
+                "activation": config.activation,
+                "tie_output_head": int(config.tie_output_head),
+                "share_norm": int(config.share_norm),
+                "use_fixed_pe": int(config.use_fixed_pe),
+                "use_output_pos_bias": int(config.use_output_pos_bias),
+            }
+        )
+    write_report_bundle(
+        output_dir=output_dir,
+        architecture={
+            "description": "Candidate comparison sweep for report plotting.",
+            "parameter_count": -1,
+            "layers": None,
+            "heads": None,
+            "hidden_dim": None,
+            "ffn_dim": None,
+            "positional_encoding": [],
+            "weight_tying": [],
+        },
+        run_args={
+            "mode": "report_candidate_sweep",
+            "candidate_indices": candidate_indices,
+            "train_size": train_size,
+            "eval_size": eval_size,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "seed": seed,
+            "eval_all_pairs": eval_all_pairs,
+        },
+        history=[],
+        comparison_rows=comparison_rows,
+    )
 
 
 def get_config(candidate_index: int | None) -> ModelConfig:
@@ -1030,14 +1395,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--demo-train", action="store_true")
     parser.add_argument("--analyze-bits", action="store_true")
+    parser.add_argument("--report-candidate-sweep", action="store_true")
     parser.add_argument("--sweep-candidates", action="store_true")
     parser.add_argument("--candidate-index", type=int)
+    parser.add_argument("--candidate-indices", type=int, nargs="+")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--train-size", type=int, default=4096)
     parser.add_argument("--eval-size", type=int, default=512)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--eval-all-pairs", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--save-report-dir")
     return parser.parse_args()
 
 
@@ -1056,6 +1424,22 @@ def main() -> None:
             eval_all_pairs=args.eval_all_pairs,
         )
         return
+    if args.report_candidate_sweep:
+        if not args.candidate_indices:
+            raise ValueError("--report-candidate-sweep requires --candidate-indices")
+        if not args.save_report_dir:
+            raise ValueError("--report-candidate-sweep requires --save-report-dir")
+        run_report_candidate_sweep(
+            candidate_indices=args.candidate_indices,
+            train_size=args.train_size,
+            eval_size=args.eval_size,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            eval_all_pairs=args.eval_all_pairs,
+            output_dir=args.save_report_dir,
+        )
+        return
     if args.analyze_bits:
         run_bit_analysis(
             config=get_config(args.candidate_index),
@@ -1065,6 +1449,8 @@ def main() -> None:
             batch_size=args.batch_size,
             seed=args.seed,
             eval_all_pairs=args.eval_all_pairs,
+            candidate_index=args.candidate_index,
+            save_report_dir=args.save_report_dir,
         )
         return
     if args.demo_train:
@@ -1076,6 +1462,8 @@ def main() -> None:
             batch_size=args.batch_size,
             seed=args.seed,
             eval_all_pairs=args.eval_all_pairs,
+            candidate_index=args.candidate_index,
+            save_report_dir=args.save_report_dir,
         )
         return
     print("Candidate configs:")

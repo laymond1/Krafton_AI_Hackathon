@@ -64,12 +64,16 @@ Use this file only for Day 1. Do not copy Day 2 problem content into this log.
 | 14:37 | Candidate 6 is the first useful architecture-side fix for one-rate underprediction | Untied output head + unshared norm improved bit accuracy to about `0.638` and held up over 10 epochs | Exact-match is still low, so this is not enough by itself | Use candidate 6 as the new control for targeted low/mid-bit fixes |
 | 15:03 | Consolidate Claude's strategist/critic work into the Codex execution thread | Claude session-usage limits prevent further independent continuation; strategist and critic outputs are now available locally | Loses parallel Claude iteration, but avoids fragmented ownership and duplicated experiments | Treat Codex as the single owner of implementation, verification, and merged logging from here |
 | 15:40 | Switch the default runtime from the missing `.venv` to `conda run -n wslim python ...` | `conda env list` shows `wslim`, and the user validated `conda run -n wslim python runs/day1/codex/submission_draft.py --demo-train --candidate-index 0` as the working path | Removes drift between sessions and defines one canonical command style | Run future Day 1 commands through `conda run -n wslim python ...` |
+| 16:27 | Keep candidate 6 as control after the first targeted underprediction follow-up sweep | Candidate 7 raised `P03` to `P08` one-rate but hurt `P00`, `P10`, and `P11`; candidate 8 and candidate 9 also failed to produce a cleaner tradeoff; candidate 7 at 10 epochs still landed below control | The new family taught us which direction not to take, but it did not improve the main metric | Search for more selective calibration changes rather than broad output-position bias |
 
 ## Risks and Blockers
 
 - Risk: Codex-side sandbox probing may differ from the user's actual `wslim` runtime
 - Impact: local diagnostics from Codex can disagree with the user-validated GPU-backed execution path
 - Mitigation: use `conda run -n wslim python ...` as the default path and treat that command as authoritative for Day 1 runs
+- Risk: output-position bias variants can improve the target middle-band `pred1` by collapsing edge bits instead of learning cleaner multiplication structure
+- Impact: apparent underprediction improvement can be misleading if it simply moves the error mass from `P02` to `P08` into `P00`, `P10`, and `P11`
+- Mitigation: keep using per-bit `pred1` and `first_wrong_bit` together, and reject variants that trade a middle-band gain for edge-bit collapse
 - Risk: Claude workstream can no longer continue independently in-session
 - Impact: any remaining strategist/critic guidance must be manually integrated into Codex, and no further parallel Claude execution should be assumed
 - Mitigation: treat `runs/day1/claude/strategist.md` and `runs/day1/claude/critic.md` as frozen inputs and keep one authoritative log under Codex
