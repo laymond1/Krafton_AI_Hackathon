@@ -2,6 +2,9 @@
 .DS_Store
 __pycache__/
 *.pyc
+.codex
+vendor/
 AdderBoard/
 papers/idea1_2_5_arithmetic/arithmetic/
 papers/idea3_teaching_arithmetic/teaching_arithmetic/
+./papers

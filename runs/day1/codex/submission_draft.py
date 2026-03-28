@@ -114,6 +114,7 @@ class ModelConfig:
     share_norm: bool = False
     tie_output_head: bool = True
     use_fixed_pe: bool = False
+    use_output_pos_bias: bool = False
     dropout: float = 0.0
 
 
@@ -354,6 +355,9 @@ class TinyMultiplierTransformer(nn.Module):
         if not config.tie_output_head:
             self.output_head = nn.Linear(config.d_model, VOCAB_SIZE, bias=False)
         self.output_bias = nn.Parameter(torch.zeros(VOCAB_SIZE))
+        self.output_pos_bias = None
+        if config.use_output_pos_bias:
+            self.output_pos_bias = nn.Parameter(torch.zeros(OUTPUT_BITS, VOCAB_SIZE))
 
     def forward(self, token_ids: Tensor) -> Tensor:
         seq_len = token_ids.size(1)
@@ -365,8 +369,15 @@ class TinyMultiplierTransformer(nn.Module):
             x = block(x, attn_mask)
         x = self.final_norm(x)
         if self.output_head is not None:
-            return self.output_head(x) + self.output_bias
-        return self.token_embedding.as_linear(x) + self.output_bias
+            logits = self.output_head(x) + self.output_bias
+        else:
+            logits = self.token_embedding.as_linear(x) + self.output_bias
+        if self.output_pos_bias is not None and seq_len >= PROMPT_LEN:
+            output_steps = min(seq_len - (PROMPT_LEN - 1), OUTPUT_BITS)
+            logits[:, PROMPT_LEN - 1 : PROMPT_LEN - 1 + output_steps, :] += (
+                self.output_pos_bias[:output_steps].unsqueeze(0)
+            )
+        return logits
 
 
 def build_model() -> nn.Module:
@@ -479,6 +490,54 @@ def candidate_configs() -> List[ModelConfig]:
             share_norm=False,
             tie_output_head=False,
         ),
+        # candidate 8: control + output-position logit bias
+        ModelConfig(
+            d_model=4,
+            n_heads=1,
+            head_dim=4,
+            n_layers=1,
+            ffn_dim=8,
+            rope_theta=3.0,
+            embedding_style="learned",
+            attention_style="k_eq_v",
+            activation="swiglu",
+            tie_o_to_q=True,
+            share_norm=False,
+            tie_output_head=False,
+            use_output_pos_bias=True,
+        ),
+        # candidate 9: candidate 8 + 2-head routing + untied attention output
+        ModelConfig(
+            d_model=4,
+            n_heads=2,
+            head_dim=2,
+            n_layers=1,
+            ffn_dim=8,
+            rope_theta=3.0,
+            embedding_style="learned",
+            attention_style="k_eq_v",
+            activation="swiglu",
+            tie_o_to_q=False,
+            share_norm=False,
+            tie_output_head=False,
+            use_output_pos_bias=True,
+        ),
+        # candidate 10: candidate 9 + fully separate K/V/O for extra positive-bit freedom
+        ModelConfig(
+            d_model=4,
+            n_heads=2,
+            head_dim=2,
+            n_layers=1,
+            ffn_dim=8,
+            rope_theta=3.0,
+            embedding_style="learned",
+            attention_style="separate",
+            activation="swiglu",
+            tie_o_to_q=False,
+            share_norm=False,
+            tie_output_head=False,
+            use_output_pos_bias=True,
+        ),
         ModelConfig(
             d_model=4,
             n_heads=1,
@@ -494,7 +553,7 @@ def candidate_configs() -> List[ModelConfig]:
             tie_output_head=False,
             use_fixed_pe=True,
         ),
-        # candidate 9: d=16, 2L, 2h — medium baseline
+        # candidate 12: d=16, 2L, 2h — medium baseline
         ModelConfig(
             d_model=16,
             n_heads=2,
@@ -507,7 +566,7 @@ def candidate_configs() -> List[ModelConfig]:
             activation="swiglu",
             tie_output_head=True,
         ),
-        # candidate 10: d=32, 2L, 2h — conservative safe baseline
+        # candidate 13: d=32, 2L, 2h — conservative safe baseline
         ModelConfig(
             d_model=32,
             n_heads=2,
@@ -520,7 +579,7 @@ def candidate_configs() -> List[ModelConfig]:
             activation="swiglu",
             tie_output_head=True,
         ),
-        # candidate 11: d=64, 2L, 4h — safe ceiling
+        # candidate 14: d=64, 2L, 4h — safe ceiling
         ModelConfig(
             d_model=64,
             n_heads=4,
@@ -687,6 +746,84 @@ def per_bit_profile(
     }
 
 
+@torch.no_grad()
+def teacher_forced_bit_profile(
+    model: nn.Module,
+    pairs: Iterable[Tuple[int, int]],
+    device: torch.device,
+    batch_size: int = 256,
+) -> dict:
+    sequences = [encode_example(a, b) for a, b in pairs]
+    stats = [
+        {
+            "correct": 0,
+            "total": 0,
+            "false_positive": 0,
+            "false_negative": 0,
+            "pred_ones": 0,
+            "target_ones": 0,
+            "prob_one_sum": 0.0,
+        }
+        for _ in range(OUTPUT_BITS)
+    ]
+    first_wrong = [0 for _ in range(OUTPUT_BITS)]
+    exact_matches = 0
+
+    model.eval()
+    for start in range(0, len(sequences), batch_size):
+        batch = torch.tensor(
+            sequences[start : start + batch_size], dtype=torch.long, device=device
+        )
+        logits = model(batch[:, :-1])[:, PROMPT_LEN - 1 :, :]
+        probs = F.softmax(logits, dim=-1)
+        predictions = logits.argmax(dim=-1)
+        targets = batch[:, PROMPT_LEN:]
+        wrong_mask = predictions.ne(targets)
+
+        for bit_index in range(OUTPUT_BITS):
+            bit_predictions = predictions[:, bit_index]
+            bit_targets = targets[:, bit_index]
+            bit_wrong = wrong_mask[:, bit_index]
+            bit_stats = stats[bit_index]
+            bit_stats["total"] += int(bit_targets.numel())
+            bit_stats["correct"] += int((~bit_wrong).sum().item())
+            bit_stats["false_positive"] += int(
+                ((bit_predictions == 1) & (bit_targets == 0)).sum().item()
+            )
+            bit_stats["false_negative"] += int(
+                ((bit_predictions == 0) & (bit_targets == 1)).sum().item()
+            )
+            bit_stats["pred_ones"] += int((bit_predictions == 1).sum().item())
+            bit_stats["target_ones"] += int((bit_targets == 1).sum().item())
+            bit_stats["prob_one_sum"] += float(probs[:, bit_index, 1].sum().item())
+
+        first_wrong_batch = wrong_mask.float().argmax(dim=-1)
+        wrong_rows = wrong_mask.any(dim=-1)
+        for row_index, has_wrong in enumerate(wrong_rows.tolist()):
+            if has_wrong:
+                first_wrong[int(first_wrong_batch[row_index].item())] += 1
+            else:
+                exact_matches += 1
+
+    return {
+        "total_cases": len(sequences),
+        "exact_matches": exact_matches,
+        "first_wrong": first_wrong,
+        "bits": [
+            {
+                "bit": bit_index,
+                "accuracy": bit_stats["correct"] / max(1, bit_stats["total"]),
+                "false_positive_rate": bit_stats["false_positive"] / max(1, bit_stats["total"]),
+                "false_negative_rate": bit_stats["false_negative"] / max(1, bit_stats["total"]),
+                "pred_one_rate": bit_stats["pred_ones"] / max(1, bit_stats["total"]),
+                "target_one_rate": bit_stats["target_ones"] / max(1, bit_stats["total"]),
+                "avg_prob_one": bit_stats["prob_one_sum"] / max(1, bit_stats["total"]),
+            }
+            for bit_index, bit_stats in enumerate(stats)
+        ],
+    }
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -712,6 +849,10 @@ def train_model(
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
+    if device.type == "cuda":
+        print(f"Using device: cuda ({torch.cuda.get_device_name(0)})")
+    else:
+        print(f"Using device: {device.type}")
     model = TinyMultiplierTransformer(config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -759,17 +900,20 @@ def run_demo_train(
         scheduler.step()
 
 
-def print_bit_report(report: dict) -> None:
-    print("bit_profile")
+def print_bit_report(report: dict, label: str) -> None:
+    print(f"{label}_bit_profile")
     for bit in report["bits"]:
+        avg_prob_one = bit.get("avg_prob_one")
+        prob_suffix = "" if avg_prob_one is None else f" prob1={avg_prob_one:.4f}"
         print(
             f"P{bit['bit']:02d} acc={bit['accuracy']:.4f} "
             f"fp={bit['false_positive_rate']:.4f} "
             f"fn={bit['false_negative_rate']:.4f} "
             f"pred1={bit['pred_one_rate']:.4f} "
             f"gold1={bit['target_one_rate']:.4f}"
+            f"{prob_suffix}"
         )
-    print("first_wrong_bit")
+    print(f"{label}_first_wrong_bit")
     for bit_index, count in enumerate(report["first_wrong"]):
         print(f"P{bit_index:02d} first_wrong_count={count}")
 
@@ -791,14 +935,15 @@ def run_bit_analysis(
         seed=seed,
     )
     optimizer, scheduler, train_loader = train_parts
-    eval_pairs = build_eval_pairs(eval_size, seed, eval_all_pairs)
+    epoch_eval_pairs = random_pairs(eval_size, seed + 1)
+    final_eval_pairs = build_eval_pairs(eval_size, seed, eval_all_pairs)
 
     print(f"config={config}")
     print(f"parameters={unique_parameter_count(model)}")
     for epoch in range(1, epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, device)
-        accuracy = exact_match_accuracy(model, eval_pairs, device)
-        bit_accuracy = bitwise_accuracy(model, eval_pairs, device)
+        accuracy = exact_match_accuracy(model, epoch_eval_pairs, device)
+        bit_accuracy = bitwise_accuracy(model, epoch_eval_pairs, device)
         current_lr = optimizer.param_groups[0]["lr"]
         print(
             f"epoch={epoch} lr={current_lr:.6f} "
@@ -807,8 +952,29 @@ def run_bit_analysis(
         )
         scheduler.step()
 
-    report = per_bit_profile(model, eval_pairs, device)
-    print_bit_report(report)
+    report = per_bit_profile(model, final_eval_pairs, device)
+    teacher_forced_report = teacher_forced_bit_profile(
+        model, final_eval_pairs, device, batch_size=batch_size
+    )
+    final_exact_match = report["exact_matches"] / max(1, report["total_cases"])
+    final_bit_accuracy = sum(bit["accuracy"] for bit in report["bits"]) / OUTPUT_BITS
+    teacher_forced_exact_match = teacher_forced_report["exact_matches"] / max(
+        1, teacher_forced_report["total_cases"]
+    )
+    teacher_forced_bit_accuracy = (
+        sum(bit["accuracy"] for bit in teacher_forced_report["bits"]) / OUTPUT_BITS
+    )
+    print(
+        f"final_eval exact_match={final_exact_match:.4f} "
+        f"bit_accuracy={final_bit_accuracy:.4f} total_cases={report['total_cases']}"
+    )
+    print(
+        f"teacher_forced_eval exact_match={teacher_forced_exact_match:.4f} "
+        f"bit_accuracy={teacher_forced_bit_accuracy:.4f} "
+        f"total_cases={teacher_forced_report['total_cases']}"
+    )
+    print_bit_report(report, label="greedy")
+    print_bit_report(teacher_forced_report, label="teacher_forced")
 
 
 def get_config(candidate_index: int | None) -> ModelConfig:

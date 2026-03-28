@@ -40,7 +40,8 @@
 
 # Risks
 
-- Local `.venv` runtime has `torch`, but it warns that `numpy` is not installed.
+- Default runtime is now `conda run -n wslim python ...`.
+- User-validated execution path for Day 1 is `conda run -n wslim python runs/day1/codex/submission_draft.py --demo-train --candidate-index 0`, and Codex should treat that as the canonical run command for this repo.
 - `Problem 1-1` may remain unprovable within the time budget even if a rough design exists.
 - Current `Problem 1-2` candidates learn bit structure faster than the original baseline, but exact-match remains far below the target.
 - Claude critic raises an unresolved high-risk warning: the current tiny-family experiments are useful for diagnosis, but none are evidence for a final fixed-protocol score yet.
@@ -49,7 +50,7 @@
 # Deliverables
 
 - Selected approach summary centered on `Problem 1-2` first and `Problem 1-1` timeboxed.
-- Draft single-file scaffold at `runs/day1/codex/submission_draft.py`, now smoke-tested in `.venv`.
+- Draft single-file scaffold at `runs/day1/codex/submission_draft.py`, runnable via `conda run -n wslim python ...`.
 - Validation points:
 - worked-example token checks,
 - unique parameter counting,

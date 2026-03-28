@@ -134,6 +134,7 @@ krafton-prelim-ops/
 │  └─ operator_log_day2.md
 ├─ scripts/
 │  ├─ init_run.sh
+│  ├─ with_wslim.sh
 │  ├─ make_worktrees.sh
 │  ├─ sync_outputs.sh
 │  ├─ diff_summary.sh
@@ -174,6 +175,29 @@ krafton-prelim-ops/
    ```
 
 Repeat the same process for `day2`, but keep Day 1 and Day 2 content logically separate.
+
+## Runtime Environment
+
+Default runtime for this repo is the Conda environment `wslim`.
+
+Activate it directly:
+
+```bash
+source /mnt/sdab1/userHome/wslim/miniconda/etc/profile.d/conda.sh
+conda activate wslim
+```
+
+Or use the repo wrapper:
+
+```bash
+./scripts/with_wslim.sh python --version
+```
+
+For Python and PyTorch commands in this repo, prefer the wrapper so execution stays on one consistent environment:
+
+```bash
+./scripts/with_wslim.sh python runs/day1/codex/submission_draft.py --smoke-test
+```
 
 ## Recommended Git and worktree setup
 

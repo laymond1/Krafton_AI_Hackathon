@@ -63,15 +63,19 @@ Use this file only for Day 1. Do not copy Day 2 problem content into this log.
 | 14:26 | Bit analysis shows the current bottleneck is not vague “insufficient capacity” but one-rate underproduction | Candidate 3 collapses to all zeros; candidate 5 still underpredicts ones, especially in middle bits | Broad sweeps alone will likely keep rediscovering the same failure mode | Next iteration should target low-bit and mid-bit positive prediction explicitly |
 | 14:37 | Candidate 6 is the first useful architecture-side fix for one-rate underprediction | Untied output head + unshared norm improved bit accuracy to about `0.638` and held up over 10 epochs | Exact-match is still low, so this is not enough by itself | Use candidate 6 as the new control for targeted low/mid-bit fixes |
 | 15:03 | Consolidate Claude's strategist/critic work into the Codex execution thread | Claude session-usage limits prevent further independent continuation; strategist and critic outputs are now available locally | Loses parallel Claude iteration, but avoids fragmented ownership and duplicated experiments | Treat Codex as the single owner of implementation, verification, and merged logging from here |
+| 15:40 | Switch the default runtime from the missing `.venv` to `conda run -n wslim python ...` | `conda env list` shows `wslim`, and the user validated `conda run -n wslim python runs/day1/codex/submission_draft.py --demo-train --candidate-index 0` as the working path | Removes drift between sessions and defines one canonical command style | Run future Day 1 commands through `conda run -n wslim python ...` |
 
 ## Risks and Blockers
 
-- Risk: `.venv` torch emits a warning because `numpy` is missing
-- Impact: current smoke tests and short training still run, but the environment may be brittle for longer experiments or tooling
-- Mitigation: consider installing `numpy` in `.venv` before longer sweeps; continue experiments if no hard failure appears
+- Risk: Codex-side sandbox probing may differ from the user's actual `wslim` runtime
+- Impact: local diagnostics from Codex can disagree with the user-validated GPU-backed execution path
+- Mitigation: use `conda run -n wslim python ...` as the default path and treat that command as authoritative for Day 1 runs
 - Risk: Claude workstream can no longer continue independently in-session
 - Impact: any remaining strategist/critic guidance must be manually integrated into Codex, and no further parallel Claude execution should be assumed
 - Mitigation: treat `runs/day1/claude/strategist.md` and `runs/day1/claude/critic.md` as frozen inputs and keep one authoritative log under Codex
+- Risk: Codex-side sandbox probing and user-shell runtime observations may differ
+- Impact: local diagnostic messages from Codex may not reflect the user's actual GPU-backed execution path
+- Mitigation: treat `conda run -n wslim python ...` as the canonical repo command and prioritize user-validated runtime behavior
 
 ## Final Submission Handoff
 

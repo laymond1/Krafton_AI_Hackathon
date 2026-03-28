@@ -73,6 +73,7 @@ Created:
 - final submission area
 
 Suggested next steps:
+0. Use the default runtime wrapper for Python commands: ./scripts/with_wslim.sh python ...
 1. Paste the released problem into runs/$DAY/raw_problem/problem.md
 2. Run the Claude and Codex parser prompts against the same source text
 3. Save outputs into runs/$DAY/claude and runs/$DAY/codex

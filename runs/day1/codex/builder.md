@@ -73,7 +73,7 @@
 - `candidate_configs()` for small architecture sweeps.
 
 # Immediate Next Actions
-1. Install or activate a PyTorch-capable environment, then run the scaffold smoke tests first.
+1. Activate Conda `wslim` or use `./scripts/with_wslim.sh`, then run the scaffold smoke tests first.
 2. Run a small `Problem 1-2` candidate sweep around the default configuration and log `P_2` plus exact-match accuracy.
 3. Decide a hard cutoff time for `Problem 1-1`; continue only if the proof can be written layer by layer, otherwise preserve `P_1 = -1`.
 4. Update the merged experiment log and solution brief after each model-size decision.

@@ -38,12 +38,12 @@
 - Important: `build_model()` currently returns the large default model in `runs/day1/codex/submission_draft.py`, while the working notes discuss smaller candidate configs as the active search path. This is a sync risk for `P_2`.
 - Important: the exact-match accuracy interpretation is still an assumption, not a stated fact. Final wording must keep that separation.
 - Important: `runs/day1/merged/comparison_table.md` is blank, so controller-side merge decisions are not yet traceable.
-- Optional: the `.venv` runtime emits a `numpy` warning during torch startup. It is non-blocking, but it adds noise to logs.
+- Optional: the standardized `wslim` Conda runtime imports PyTorch successfully, but it still reports `torch.cuda.is_available() = False`, so experiments remain CPU-bound.
 
 # Deliverables
 - Verification Report
 - Verified today:
-- `runs/day1/codex/submission_draft.py` smoke test passes in `.venv`.
+- `runs/day1/codex/submission_draft.py` should now be smoke-tested and run from Conda `wslim`, preferably through `./scripts/with_wslim.sh ...`.
 - LSB-first encoding examples for `0 x 0`, `23 x 37`, and `63 x 63` are consistent with the problem statement.
 - The current code path supports greedy decoding, exact-match evaluation, bitwise evaluation, and unique-parameter counting.
 - Not yet verified:
